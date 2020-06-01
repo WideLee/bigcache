@@ -2,6 +2,7 @@ package bigcache
 
 import (
 	"fmt"
+	"sync"
 	"time"
 )
 
@@ -25,6 +26,7 @@ type BigCache struct {
 
 // Response will contain metadata about the entry for which GetWithInfo(key) was called
 type Response struct {
+	Timestamp   uint64
 	EntryStatus RemoveReason
 }
 
@@ -173,6 +175,27 @@ func (c *BigCache) Capacity() int {
 		len += shard.capacity()
 	}
 	return len
+}
+
+// get lock of shards
+func (c *BigCache) Lock(key string) *sync.RWMutex {
+	hashedKey := c.hash.Sum64(key)
+	shard := c.getShard(hashedKey)
+	return &shard.lock
+}
+
+// get without lock
+func (c *BigCache) GetWithoutLock(key string) ([]byte, error) {
+	hashedKey := c.hash.Sum64(key)
+	shard := c.getShard(hashedKey)
+	return shard.getWithoutLock(key, hashedKey)
+}
+
+// set without lock
+func (c *BigCache) SetWithoutLock(key string, entry []byte) error {
+	hashedKey := c.hash.Sum64(key)
+	shard := c.getShard(hashedKey)
+	return shard.setWithoutLock(key, hashedKey, entry)
 }
 
 // Stats returns cache's statistics

@@ -28,6 +28,29 @@ func TestWriteAndGetOnCache(t *testing.T) {
 	assertEqual(t, value, cachedValue)
 }
 
+func TestWriteAndGetOnCacheWithDIYLock(t *testing.T) {
+	t.Parallel()
+
+	// given
+	cache, _ := NewBigCache(DefaultConfig(5 * time.Second))
+	value := []byte("value")
+
+	// when
+	mutex := cache.Lock("key")
+
+	mutex.Lock()
+	cache.SetWithoutLock("key", value)
+	mutex.Unlock()
+
+	mutex.RLock()
+	cachedValue, err := cache.GetWithoutLock("key")
+	mutex.RUnlock()
+
+	// then
+	noError(t, err)
+	assertEqual(t, value, cachedValue)
+}
+
 func TestAppendAndGetOnCache(t *testing.T) {
 	t.Parallel()
 
@@ -1035,6 +1058,43 @@ func TestBigCache_GetWithInfo(t *testing.T) {
 	// then
 	assertEqual(t, err, nil)
 	assertEqual(t, Response{EntryStatus: Expired}, resp)
+	assertEqual(t, []byte(value), data)
+}
+
+func TestBigCache_GetWithInfoWithTimestamp(t *testing.T) {
+	t.Parallel()
+
+	// given
+	clock := mockedClock{value: 0}
+	cache, _ := newBigCache(Config{
+		Shards:             1,
+		LifeWindow:         5 * time.Second,
+		CleanWindow:        5 * time.Minute,
+		MaxEntriesInWindow: 1,
+		MaxEntrySize:       1,
+		HardMaxCacheSize:   1,
+		Verbose:            true,
+	}, &clock)
+	key := "deadEntryKey"
+	value := "100"
+	clock.set(5)
+	cache.Set(key, []byte(value))
+
+	// when
+	data, resp, err := cache.GetWithInfo(key)
+
+	// then
+	assertEqual(t, []byte(value), data)
+	noError(t, err)
+	assertEqual(t, Response{Timestamp: 5}, resp)
+
+	// when
+	clock.set(10)
+	data, resp, err = cache.GetWithInfo(key)
+
+	// then
+	assertEqual(t, err, nil)
+	assertEqual(t, Response{Timestamp: 5, EntryStatus: Expired}, resp)
 	assertEqual(t, []byte(value), data)
 }
 
