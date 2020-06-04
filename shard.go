@@ -2,6 +2,7 @@ package bigcache
 
 import (
 	"fmt"
+	"runtime"
 	"sync"
 	"sync/atomic"
 
@@ -9,6 +10,7 @@ import (
 )
 
 type onRemoveCallback func(wrappedEntry []byte, reason RemoveReason)
+type onPanicCallback func(err error, stack []byte)
 
 // Metadata contains information of a spesific entry
 type Metadata struct {
@@ -21,6 +23,7 @@ type cacheShard struct {
 	lock        sync.RWMutex
 	entryBuffer []byte
 	onRemove    onRemoveCallback
+	onPanic     onPanicCallback
 
 	isVerbose    bool
 	statsEnabled bool
@@ -256,7 +259,18 @@ func (s *cacheShard) onEvict(oldestEntry []byte, currentTimestamp uint64, evict 
 }
 
 func (s *cacheShard) cleanUp(currentTimestamp uint64) {
+	defer func() {
+		// panic recover
+		if e := recover(); e != nil {
+			var buf [4096]byte
+			n := runtime.Stack(buf[:], false)
+			s.onPanic(fmt.Errorf("%v", e), buf[:n])
+		}
+	}()
+
 	s.lock.Lock()
+	defer s.lock.Unlock()
+
 	for {
 		if oldestEntry, err := s.entries.Peek(); err != nil {
 			break
@@ -264,7 +278,6 @@ func (s *cacheShard) cleanUp(currentTimestamp uint64) {
 			break
 		}
 	}
-	s.lock.Unlock()
 }
 
 func (s *cacheShard) getEntry(index int) ([]byte, error) {
@@ -377,8 +390,8 @@ func (s *cacheShard) collision() {
 	atomic.AddInt64(&s.stats.Collisions, 1)
 }
 
-func initNewShard(config Config, callback onRemoveCallback, clock clock) *cacheShard {
-	return &cacheShard{
+func initNewShard(config Config, callback onRemoveCallback, panicCallback onPanicCallback, clock clock) *cacheShard {
+	s := &cacheShard{
 		hashmap:      make(map[uint64]uint32, config.initialShardSize()),
 		hashmapStats: make(map[uint64]uint32, config.initialShardSize()),
 		entries:      *queue.NewBytesQueue(config.initialShardSize()*config.MaxEntrySize, config.maximumShardSize(), config.Verbose),
@@ -391,4 +404,14 @@ func initNewShard(config Config, callback onRemoveCallback, clock clock) *cacheS
 		lifeWindow:   uint64(config.LifeWindow.Seconds()),
 		statsEnabled: config.StatsEnabled,
 	}
+
+	if panicCallback == nil {
+		panicCallback = func(err error, stack []byte) {
+			s.logger.Printf("panic recover, err: %v, stack: \n%v", err, string(stack))
+		}
+	}
+
+	s.onPanic = panicCallback
+
+	return s
 }

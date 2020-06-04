@@ -3,6 +3,7 @@ package bigcache
 import (
 	"bytes"
 	"fmt"
+	"log"
 	"math"
 	"math/rand"
 	"runtime"
@@ -1096,6 +1097,63 @@ func TestBigCache_GetWithInfoWithTimestamp(t *testing.T) {
 	assertEqual(t, err, nil)
 	assertEqual(t, Response{Timestamp: 5, EntryStatus: Expired}, resp)
 	assertEqual(t, []byte(value), data)
+}
+
+func TestBigCache_OnPanicCallback(t *testing.T) {
+	t.Parallel()
+
+	var panicErr = fmt.Errorf("test panic")
+	// given
+	clock := mockedClock{value: 0}
+	cache, _ := newBigCache(Config{
+		Shards:             1,
+		LifeWindow:         5 * time.Second,
+		CleanWindow:        5 * time.Minute,
+		MaxEntriesInWindow: 1,
+		MaxEntrySize:       1,
+		HardMaxCacheSize:   1,
+		OnPanic: func(err error, stack []byte) {
+			log.Printf("on panic, err: %v", err)
+			assertEqual(t, err.Error(), panicErr.Error())
+		},
+		OnRemove: func(key string, entry []byte) {
+			panic(panicErr)
+		},
+		Verbose: true,
+	}, &clock)
+
+	// when
+	err := cache.Set("1", []byte("1value"))
+	noError(t, err)
+
+	clock.set(1)
+	err = cache.Set("2", []byte("2value"))
+	noError(t, err)
+
+	clock.set(2)
+	err = cache.Set("3", []byte("3value"))
+	noError(t, err)
+
+	clock.set(3)
+	err = cache.Set("4", []byte("4value"))
+	noError(t, err)
+
+	clock.set(4)
+	err = cache.Set("5", []byte("5value"))
+	noError(t, err)
+
+	clock.set(6)
+	cache.cleanUp(uint64(clock.epoch()))
+	clock.set(7)
+	cache.cleanUp(uint64(clock.epoch()))
+	clock.set(8)
+	cache.cleanUp(uint64(clock.epoch()))
+	clock.set(9)
+	cache.cleanUp(uint64(clock.epoch()))
+
+	value, err := cache.Get("5")
+	noError(t, err)
+	assertEqual(t, value, []byte("5value"))
 }
 
 type mockedLogger struct {

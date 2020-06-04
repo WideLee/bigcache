@@ -127,6 +127,8 @@ func (q *BytesQueue) allocateAdditionalMemory(minimum int) {
 			q.head = leftMarginIndex
 			q.tail = q.rightMargin
 		}
+
+		q.full = false
 	}
 
 	if q.verbose {

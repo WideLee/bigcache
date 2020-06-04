@@ -81,7 +81,7 @@ func newBigCache(config Config, clock clock) (*BigCache, error) {
 	}
 
 	for i := 0; i < config.Shards; i++ {
-		cache.shards[i] = initNewShard(config, onRemove, clock)
+		cache.shards[i] = initNewShard(config, onRemove, config.OnPanic, clock)
 	}
 
 	if config.CleanWindow > 0 {

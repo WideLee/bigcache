@@ -42,6 +42,9 @@ type Config struct {
 	// Ignored if OnRemove is specified.
 	OnRemoveWithReason func(key string, entry []byte, reason RemoveReason)
 
+	// recover from panic
+	OnPanic func(err error, stack []byte)
+
 	onRemoveFilter int
 
 	// Logger is a logging interface and used in combination with `Verbose`
